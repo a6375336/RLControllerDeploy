@@ -1,0 +1,29 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+x = np.linspace(-10, 10, 400)
+y = x ** 2
+y_cos = torch.randn(400,2)
+
+
+plt.figure()
+
+subPic1 = plt.subplot(2,2,1)
+plt.figure()
+subPic2 = plt.subplot(2,2,2)
+
+plt.sca(subPic1)
+plt.plot(x,y)
+
+plt.sca(subPic2)
+plt.plot(x, y_cos[:,0], label='cos(x)')
+
+# 3. 设置图表标题和坐标轴标签
+plt.title("y = x^2")
+plt.xlabel("x")
+plt.ylabel("y")
+plt.grid(True)
+
+# 4. 展示图像
+plt.show()
