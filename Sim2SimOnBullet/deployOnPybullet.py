@@ -10,18 +10,18 @@ import matplotlib.pyplot as plt # pic
 import os
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 import sys
-sys.path.append(r'G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy-main\rsl_rl')
+sys.path.append(r'G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy\rsl_rl')
 from rsl_rl.runners import OnPolicyRunner
 from rsl_rl.modules import ActorCritic
 
 p_gains = torch.Tensor([100, 100, 200, 100, 100, 100, 200, 100])
 d_gains = torch.Tensor([3.0, 3.0, 6.0, 3.0, 3.0, 3.0, 6.0, 3.0])
-torques_limit = torch.Tensor([100, 100, 150, 30, 100, 100, 150, 30])
+torques_limit = torch.Tensor([48, 18, 48, 3, 48, 18, 48, 3])
 actions_limit = torch.Tensor([100,100,100,100,100,100,100,100])
 joint_damping = torch.Tensor([3.0, 3.0, 6.0, 3.0, 3.0, 3.0, 6.0, 3.0])
 
 def Cpt_torques(actions, q, qd):
-    torques = ( p_gains * (actions - q) - d_gains * qd)
+    torques = ( 0.8* p_gains * (actions - q) - 2 * d_gains * qd)
     # torques = torch.Tensor([0,0,0,0,100, -100,100 ,100])
 
     torques = torch.clip(torques, -torques_limit, torques_limit)
@@ -69,11 +69,16 @@ def GetJointState(r_ind, num_joints, defaultAngle):
     return q_torch, qd_torch
 
 def GetObservation(r_ind, num_joints, defaultAngle, lastAction, timeStep):
-    
+    if not hasattr(GetObservation, "last_lin_vel"):
+        GetObservation.last_lin_vel = torch.zeros(3)
+        
     linear_velocity, angular_velocity = pybullet.getBaseVelocity(r_ind)
+    linear_velocity = torch.tensor(linear_velocity)
+    acce = (linear_velocity - GetObservation.last_lin_vel) / timeStep
+    GetObservation.last_lin_vel = linear_velocity
+        
     ang_vel = torch.Tensor([angular_velocity[0], angular_velocity[1], angular_velocity[2]])
     ang_vel *= 0.25
-    # print("ang_vel {}".format(ang_vel))
 
     position, orientation = pybullet.getBasePositionAndOrientation(r_ind)
     base_rotation_matrix = np.array(pybullet.getMatrixFromQuaternion(orientation)).reshape(3, 3)
@@ -87,7 +92,7 @@ def GetObservation(r_ind, num_joints, defaultAngle, lastAction, timeStep):
     q_torch, qd_torch = GetJointState(r_ind, num_joints, defaultAngle)
     qd_torch *= 0.05
     
-    res = torch.cat((ang_vel,projected_grativity_torch,vcmd,q_torch,qd_torch, lastAction), dim=-1)
+    res = torch.cat((acce, ang_vel,projected_grativity_torch,vcmd,q_torch,qd_torch, lastAction), dim=-1)
     
     return res
 
@@ -103,16 +108,26 @@ def PlotSubFunc(picHandleArray, xData, yData, title, xlabel, ylabel):
 def PlotObs(obsTimeAxis, obsRecd):
     obsRecd = torch.reshape(obsRecd, (len(obsTimeAxis), -1))
     plt.figure()
-    angPic = [plt.subplot(7,3,i + 1) for i in range(3)]
-    graPic = [plt.subplot(7,3,i + 4) for i in range(3)]
-    vcmdPic = [plt.subplot(7,3,i + 7) for i in range(3)]
-    qPic = [plt.subplot(7,4,i + 13) for i in range(8)]
-    qdPic = [plt.subplot(7,4,i + 21) for i in range(8)]
+    accPic = [plt.subplot(8,3,i + 1) for i in range(3)]
+    angPic = [plt.subplot(8,3,i + 4) for i in range(3)]
+    graPic = [plt.subplot(8,3,i + 7) for i in range(3)]
+    vcmdPic = [plt.subplot(8,3,i + 10) for i in range(3)]
+    qPic = [plt.subplot(8,4,i + 17) for i in range(8)]
+    qdPic = [plt.subplot(8,4,i + 25) for i in range(8)]
+    
+    # acc
+    for i in range(3):
+        plt.sca(accPic[i])
+        plt.plot(obsTimeAxis, obsRecd[:, i].detach().numpy())
+        plt.title("angular vel {}".format(i))
+        plt.xlabel("time")
+        plt.ylabel("rad/s")
+        plt.grid(True)
     
     # 角速度
     for i in range(3):
         plt.sca(angPic[i])
-        plt.plot(obsTimeAxis, obsRecd[:, i].detach().numpy())
+        plt.plot(obsTimeAxis, obsRecd[:, i+3].detach().numpy())
         plt.title("angular vel {}".format(i))
         plt.xlabel("time")
         plt.ylabel("rad/s")
@@ -121,7 +136,7 @@ def PlotObs(obsTimeAxis, obsRecd):
     # 重力投影
     for i in range(3):
         plt.sca(graPic[i])
-        plt.plot(obsTimeAxis, obsRecd[:, i + 3].detach().numpy())
+        plt.plot(obsTimeAxis, obsRecd[:, i + 6].detach().numpy())
         plt.title("projected gravity {}".format(i))
         plt.xlabel("time")
         plt.ylabel("m")
@@ -130,7 +145,7 @@ def PlotObs(obsTimeAxis, obsRecd):
     # vcmd
     for i in range(3):
         plt.sca(vcmdPic[i])
-        plt.plot(obsTimeAxis, obsRecd[:, i + 6].detach().numpy())
+        plt.plot(obsTimeAxis, obsRecd[:, i + 9].detach().numpy())
         plt.title("vcmd {}".format(i))
         plt.xlabel("time")
         plt.ylabel("m/s")
@@ -139,7 +154,7 @@ def PlotObs(obsTimeAxis, obsRecd):
     # q
     for i in range(8):
         plt.sca(qPic[i])
-        plt.plot(obsTimeAxis, obsRecd[:, i + 9].detach().numpy())
+        plt.plot(obsTimeAxis, obsRecd[:, i + 12].detach().numpy())
         plt.title("q {}".format(i))
         plt.xlabel("time")
         plt.ylabel("rad")
@@ -148,7 +163,7 @@ def PlotObs(obsTimeAxis, obsRecd):
     # qd
     for i in range(8):
         plt.sca(qdPic[i])
-        plt.plot(obsTimeAxis, obsRecd[:, i + 17].detach().numpy())
+        plt.plot(obsTimeAxis, obsRecd[:, i + 20].detach().numpy())
         plt.title("qd {}".format(i))
         plt.xlabel("time")
         plt.ylabel("rad/s")
@@ -210,10 +225,10 @@ if __name__ == '__main__':
     # 载入urdf格式是场景
     pybullet.loadURDF("plane100.urdf", useMaximalCoordinates=True)
     # 载入urdf格式的机器人
-    startPos = [0, 0, 0.9]
+    startPos = [0, 0, 0.79]
     startOri = pybullet.getQuaternionFromEuler([0,0,0])
     r_ind = pybullet.loadURDF(
-        r'G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy-main\Sim2SimOnBullet\biped_robot_240313b\urdf\biped_robot_240313b.urdf',
+        r'G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy\Sim2SimOnBullet\biped_robot_240313b\urdf\biped_robot_240313b.urdf',
         startPos, startOri, useFixedBase=False)
     # dof 初始化  
     # 获取关节数量
@@ -223,8 +238,26 @@ if __name__ == '__main__':
     for jointNumber in range(numJoints):
         pybullet.resetJointState(r_ind, jointNumber, defaultAngle[jointNumber])
         # pybullet.changeDynamics(r_ind, jointNumber, angularDamping=joint_damping[jointNumber])
+        
+    for link_index in range(numJoints):
+        link_info = pybullet.changeDynamics(r_ind, link_index, lateralFriction=1.5)
+        
+    for link_index in range(numJoints):
+        link_info = pybullet.getDynamicsInfo(r_ind, link_index)
+        print(f"\
+                [0]质量: {link_info[0]}\n\
+                [1]横向摩擦系数(lateral friction): {link_info[1]}\n\
+                [2]主惯性矩: {link_info[2]}\n\
+                [3]惯性坐标系的位置: {link_info[3]}\n\
+                [4]惯性坐标系的姿态: {link_info[4]}\n\
+                [5]恢复系数: {link_info[5]}\n\
+                [6]滚动摩擦系数: {link_info[6]}\n\
+                [7]扭转摩擦系数: {link_info[7]}\n\
+                [8]接触阻尼: {link_info[8]}\n\
+                [9]接触刚度: {link_info[9]}\n\
+                [10]物体属性(1=刚体，2=多刚体，3=软体): {link_info[10]}\n\
+                [11]碰撞边界: {link_info[11]}\n\n")
 
-# 循环步进仿真
     # 导入智能体模型
     # model = torch.jit.load(r'G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy-main\Sim2SimOnBullet\policy_0327.pt') #policy_0325 
     
@@ -232,10 +265,10 @@ if __name__ == '__main__':
     #                         train_cfg=?,
     #                         )
     # runner.load(r"G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy-main\Sim2SimOnBullet\model_20000.pt")
-    actor_critic = ActorCritic(33, 33, 8,
+    actor_critic = ActorCritic(36, 36, 8,
                                actor_hidden_dims=[512, 256, 128],
                                 critic_hidden_dims=[512, 256, 128])
-    loaded_dict = torch.load(r"G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy-main\Sim2SimOnBullet\model_20000.pt",
+    loaded_dict = torch.load(r"G:\Project\RL_code\RL_Deploy\RLControllerDeploy-main\RLControllerDeploy\Sim2SimOnBullet\model_0402.pt",
                              map_location=torch.device('cpu'))
     actor_critic.load_state_dict(loaded_dict["model_state_dict"])
     model = actor_critic.act_inference
@@ -282,6 +315,8 @@ if __name__ == '__main__':
         obsRecd = torch.cat((obsRecd, obs), dim=-1)
         
         actions = model(obs)
+        # if torch.isnan(actions).any():
+        #     print("there is nan ele")
         actions = torch.clip(actions, -100, 100)
         actionsRecd = torch.cat((actionsRecd, actions), dim=-1)
         
@@ -296,7 +331,6 @@ if __name__ == '__main__':
             pybullet.stepSimulation()
             time.sleep(timeStep)
             q_torch, qd_torch = GetJointState(r_ind, 8, defaultAngle)
-    
     
     PlotObs(obsTimeAxis, obsRecd)
     PlotActions(obsTimeAxis, actionsRecd)
